@@ -1,79 +1,110 @@
-import dataStruct
+import data
 import numpy as np
+from config import InputFieldNames,Parameters
 
 class PartitionClass:
-    def __init__(self,orderData,supplierData,historicalData,productionDays,targetIE,paramWeight,repeatDatePenalty):
-        self.orderData = orderData
-        self.supplierData = supplierData
-        self.historicalSheetData = historicalData
-        self.productionDays = productionDays
-        self.targetIE = targetIE
-        self.paramWeight=paramWeight
-        self.repeatDatePenalty=repeatDatePenalty
-    def __getattr_(self,name):
-        return self.name
+    def __init__(self,config):
+        self.orderData = config.orderData
+        self.supplierData = config.supplierData
+        self.historicalSheetData = config.historicalData
+        self.productionDays = config.productionDuration
+        self.capacityPercentage=config.capacityPercentage
+        self.paramWeight=config.paramWeight
     def createPartition(self):
-        def createOrderClass():
-            def setPriority():
-                orderPieces = self.orderData['SizeNum']
-                sortIndex = np.flip(sorted(range(len(orderPieces)), key=orderPieces.__getitem__))
-                return sortIndex
-            sortIndex=setPriority()
-            orderObjects=[]
-            for order in sortIndex:
-                orderID=self.orderData['BillNo'][order]
-                IEValue=self.orderData['IEValue'][order]
-                StyleID=self.orderData['GoodsNo'][order]
-                customerName=self.orderData['CustomerShortName'][order]
-                numPieces=self.orderData['SizeNum'][order]
-                color=self.orderData['CnColor'][order]
-                clothingType=self.orderData['ClothingType'][order]
-                productionDays=self.productionDays
-                deliveryDate=self.orderData['DeliveryDate'][order]
-                newClass=dataStruct.Order(orderID,IEValue,StyleID,customerName,numPieces,color,clothingType,productionDays,deliveryDate,self.historicalSheetData)
-                orderObjects.append(newClass)
-            return orderObjects
-        def createSupplierClass():
-            def setPriority():
-                manProd = self.supplierData['Man']
-                sortIndex = np.flip(sorted(range(len(manProd)), key=manProd.__getitem__))
-                return sortIndex
-            sortIndex=setPriority()
-            supplierObjects=[]
-            for supplier in range(0,len(sortIndex)):
-                name=self.supplierData['SupplierName'][sortIndex[supplier]]
-                rank=0
-                typeCapability=self.supplierData['ClothingType'][sortIndex[supplier]]
-                startingMan=self.supplierData['Man'][sortIndex[supplier]]
-                supplierObject=dataStruct.Supplier(name,rank,typeCapability,startingMan)
-                supplierObjects.append(supplierObject)
-            return supplierObjects
-        return np.array([createOrderClass(),createSupplierClass()])
+        orderSortIndex = np.flip(sorted(range(len(self.orderData[InputFieldNames.orderPieces])), key=lambda k: self.orderData[InputFieldNames.orderPieces][k]));
+        self.orderObjects=[]
+        for order in orderSortIndex:
+            orderID=self.orderData[InputFieldNames.orderID][order]
+            IEValue=self.orderData[InputFieldNames.IEValue][order]
+            StyleID=self.orderData[InputFieldNames.styleNumber][order]
+            customerName=self.orderData[InputFieldNames.customerName][order]
+            numPieces=self.orderData[InputFieldNames.orderPieces][order]
+            color=self.orderData[InputFieldNames.colorCN][order]
+            clothingType=self.orderData[InputFieldNames.clothingType][order]
+            productionDays=self.productionDays
+            deliveryDate=self.orderData[InputFieldNames.deliveryDate][order]
+            machineType=self.orderData[InputFieldNames.machineType][order]
+            self.orderObjects.append(data.Order(orderID, IEValue, StyleID, customerName, numPieces, color, clothingType, productionDays, deliveryDate, machineType,self.historicalSheetData))
+        manProd = self.supplierData[InputFieldNames.totalWorkers]
+        supplierSortIndex = np.flip(sorted(range(len(manProd)), key=lambda k: manProd[k]))
+        self.supplierObjects=[]
+        for supplier in range(0,len(supplierSortIndex)):
+            name=self.supplierData[InputFieldNames.supplierName][supplierSortIndex[supplier]]
+            rank=0
+            typeCapability=self.supplierData[InputFieldNames.clothingType][supplierSortIndex[supplier]]
+            startingMan=self.supplierData[InputFieldNames.totalWorkers][supplierSortIndex[supplier]]
+            IELevel=self.supplierData[InputFieldNames.IELevel][supplierSortIndex[supplier]]
+            processType=self.supplierData[InputFieldNames.processType][supplierSortIndex[supplier]]
+            machineType=self.supplierData[InputFieldNames.machineType][supplierSortIndex[supplier]]
+            self.supplierObjects.append(data.Supplier(name, rank, typeCapability, startingMan,IELevel,processType,machineType))
+
     def partitionData(self):
-        PartitionData=self.createPartition()
-        orderObjects=PartitionData[0]
-        supplierObjects=PartitionData[1]
-        numOrders=len(orderObjects)
-        def findsupplier(orderObjects,order,supplierObjects):
+        self.createPartition()
+        def findsupplier(order,orderObjects,supplierObjects):
             if orderObjects[order].repeatStatus[0]!='False':
-                supplierIndex=np.array([elem for elem in range(len(supplierObjects)) if supplierObjects[elem].name==orderObjects[order].repeatStatus[1]])
-                repeatStatus='True'
+                supplierIndex=np.array([elem for elem in range(len(supplierObjects)) if (supplierObjects[elem].name==orderObjects[order].repeatStatus[1] and orderObjects[order].manNeeded<=supplierObjects[elem].remainingMan)])
+                if len(supplierIndex)<1:
+                    if (orderObjects[order].orderRange == Parameters.noneMachineType):
+                        supplierIndex = np.array([elem for elem in range(len(supplierObjects))
+                                              if
+                                              (orderObjects[order].clothingType in supplierObjects[elem].typeCapability
+                                               and orderObjects[order].IERange in supplierObjects[elem].IELevel
+                                               and orderObjects[order].machineType in supplierObjects[elem].machineType
+                                               and orderObjects[order].manNeeded <=supplierObjects[elem].remainingMan*0.01
+
+                                               )])
+                    else:
+                        supplierIndex = np.array([elem for elem in range(len(supplierObjects))
+                                                  if
+                                                  (orderObjects[order].clothingType in supplierObjects[
+                                                      elem].typeCapability
+                                                   and orderObjects[order].IERange in supplierObjects[elem].IELevel
+                                                   and orderObjects[order].manNeeded <= supplierObjects[
+                                                       elem].remainingMan*0.01
+
+                                                   )])
             else:
-                supplierIndex=np.array([elem for elem in range(len(supplierObjects)) if orderObjects[order].clothingType in supplierObjects[elem].typeCapability
-                        and orderObjects[order].manNeeded<=supplierObjects[elem].remainingMan])
-                repeatStatus='False'
-            return np.array([supplierIndex,repeatStatus])
-        for order in range(0,numOrders):
-            supplierIndex=findsupplier(orderObjects,order,supplierObjects)[0]
-            orderRepeatStatus=findsupplier(orderObjects,order,supplierObjects)[1]
+                if (orderObjects[order].orderRange == Parameters.noneMachineType):
+                    supplierIndex = np.array([elem for elem in range(len(supplierObjects))
+                                              if
+                                              (orderObjects[order].clothingType in supplierObjects[elem].typeCapability
+                                               and orderObjects[order].IERange in supplierObjects[elem].IELevel
+                                               and orderObjects[order].machineType in supplierObjects[elem].machineType
+                                               and orderObjects[order].manNeeded <=supplierObjects[elem].remainingMan*0.01
+                                               )])
+                else:
+                    supplierIndex = np.array([elem for elem in range(len(supplierObjects))
+                                              if
+                                              (orderObjects[order].clothingType in supplierObjects[
+                                                  elem].typeCapability
+                                               and orderObjects[order].IERange in supplierObjects[elem].IELevel
+                                               and orderObjects[order].manNeeded <= supplierObjects[elem].remainingMan*self.capacityPercentage*0.01
+                                               )])
+            return supplierIndex
+        self.failedPartitions = []
+        for order in range(0,len(self.orderObjects)):
+            supplierIndex=findsupplier(order,self.orderObjects,self.supplierObjects)
             supplierRanks=[]
-            if len(supplierIndex)>0:
+            if len(supplierIndex)>1:
                 for supplier in supplierIndex:
-                    supplierRanks.append(supplierObjects[supplier].generateRank(orderObjects[order],self.targetIE,self.paramWeight,self.repeatDatePenalty))
-                SortIndex=np.flip([i[0] for i in sorted(enumerate(supplierRanks), key=lambda x:x[1])])
-                chosenSupplier=supplierIndex[SortIndex[0]]
-                supplierObjects[chosenSupplier].partitionOrder(orderObjects[order])
-                chosenSupplierName=supplierObjects[chosenSupplier].name
-                orderObjects[order].partitionOrder(chosenSupplierName, orderRepeatStatus)
-        return np.array([orderObjects,supplierObjects])
+                    supplierRanks.append(self.supplierObjects[supplier].generateRank(self.orderObjects[order],self.paramWeight[0][0],self.paramWeight[0][1]));
+                chosenSupplier=supplierIndex[np.argmax(supplierRanks)]
+                self.orderObjects[order].partitionOrder(self.supplierObjects[chosenSupplier].name)
+                self.supplierObjects[chosenSupplier].partitionOrder(self.orderObjects[order])
+            elif len(supplierIndex)==1:
+                chosenSupplier=supplierIndex[0]
+                chosenSupplierName = self.supplierObjects[chosenSupplier].name
+                self.orderObjects[order].partitionOrder(chosenSupplierName)
+                self.supplierObjects[chosenSupplier].partitionOrder(self.orderObjects[order])
+            else:
+                self.orderObjects[order].partitionFail();
+                self.failedPartitions.append(self.orderObjects[order])
+        self.generateResult()
+
+    def generateResult(self):
+        self.partitionResult = []
+        for supplierData in self.supplierObjects:
+            newSupplierPartition = data.SupplierPartition(supplierData)
+            newSupplierPartition.portData()
+            self.partitionResult.append(newSupplierPartition)
 
